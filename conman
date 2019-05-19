@@ -1,0 +1,252 @@
+#!/bin/bash
+#Its pretty janky, but sometimes I cant remember all my connections. This will remember them for you. Isn't that nice.
+#Version 1.0
+#TODO add ssh key forwarding for added non ssh key hosts
+
+#Sets up some script variables
+pwd="/etc/conman"
+prompt="> "
+runner=1
+error=""
+log_dir="/var/log/conman"
+
+#Trap Handler
+#Intedned so you dont ctrl-c out of the ssh connection when you are passing rsa keys
+function trap_handler() {
+	echo "\nDo you want to exit? [y/n]"
+	read trapans;
+	if [ $trapans == "y" ]; then
+		echo "Interrupt recieved at $(date)" | tee -a $log_dir/error.log
+		runner=0
+		break
+	fi
+}
+trap trap_handler SIGINT;
+
+function usage() {
+	echo "Usage: conman [-p|--use-pwd-hostfile][-r|--run-setup][-h|--help][-v|--version]"
+	echo "-p --use-pwd-hostfile | Use the hostlist in your current working directory instead of the one in etc."
+	echo "-r --run-setup | Runs the setup checks."
+	echo "-h --help | Usage menu."
+	echo "-v --version | Version information"
+}
+
+
+function version_info() {
+	echo "Version: 1.0"
+}
+
+
+function setup() {
+	#Creates log dir
+	if [ ! -d $log_dir ]; then
+		mkdir -p $log_dir
+	fi
+	#Creates conf dir
+	if [ ! -d $pwd ]; then
+		mkdir -p $pwd
+	fi
+	#Checks if you have generated rsa public key
+	if [ -f ~/.ssh/id_rsa.pub ]; then
+		echo "Using existing SSH key."
+	else
+		echo "Generating SSH key.";
+		ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''
+	fi
+
+	#Checks hostlist 
+	if [ -f $pwd/hostlist ]; then
+		echo "Hostlist exists."
+	else
+		echo "No Hostlist found, creating a new one"
+		touch $pwd/hostlist
+	fi
+	echo "Setup ran at $(date)" | tee -a $log_dir/event.log
+	echo -n "Press any button to continue $prompt"; read
+}
+
+
+#Function to connect to remote host
+function connect_shell () {
+	cat $pwd/hostlist;
+	echo "Connect to which host? (by number)"
+	echo -n $prompt; read con; let con++
+	con_ip=$(cat $pwd/hostlist |awk -F " " -v x=$con 'FNR == x {print $3}')
+		
+	echo "Use X11 forwarding? (y/n)"; read x11Forwarding
+	
+	case $x11Forwarding in
+		y|yes|Yes|Y)
+			echo "Using ssh with X11 forwarding"
+			ssh -X $con_ip
+		;;
+		n|no|No|n)
+			echo "Not using X11 forwarding."
+			ssh $con_ip
+		;;
+	esac
+
+	echo "Connection to $con_ip exited with code: $?" | tee -a $log_dir/event.log 
+	error="Closed connection."
+}
+
+
+#Function to add host to the list
+function add_host() {
+	#TODO Add usibility for multi-word names
+	echo "What do you want to label the host as? (EG. Sensor1)"
+	echo -n $prompt; read host_name
+	echo "What is the IP of the host?"
+	echo -n $prompt; read dest_ip
+	echo "Copy ssh keys?"
+	echo -n $prompt; read ans
+	case $ans in
+			y|Y|yes|Yes)
+				ssh-copy-id $dest_ip
+				#This serves as kind of a catch all other than ctrl-c
+				if [ $? -eq 0 ]; then
+					current_len=$(cat $pwd/hostlist |wc -l)
+					echo $current_len $host_name $dest_ip >> $pwd/hostlist
+					echo "Added $host_name $dest_ip to hostlist" | tee -a $log_dir/event.log
+					error="Success!"
+				else
+					error="Error: authentication interrupted."
+					echo "$error at $(date)" | tee -a $log_dir/error.log
+				fi
+			;;
+			*)
+				current_len=$(cat $pwd/hostlist |wc -l)
+				echo $current_len $host_name $dest_ip >> $pwd/hostlist
+				echo "Added $host_name $dest_ip to hostlist" | tee -a $log_dir/event.log
+				error="Success! (SSH Key not added)"
+			;;			
+	esac
+}
+
+
+#Function to remove host
+function remove_host() {
+	#Removes host from list
+	cat $pwd/hostlist
+	echo "Remove which host?"
+	echo -n $prompt; read rem_host; let rem_host++
+	cat $pwd/hostlist | awk -F " " -v x=$rem_host 'FNR != x {print $2,$3}' > $pwd/hostlist.tmp
+	
+	#Reformats new list
+	#Yeah I know it probably could have been done better but it works
+	len=$(cat $pwd/hostlist.tmp | wc -l)
+	line_num=1
+	for counter in $(seq 0 $len); do
+		sed -i "$line_num s/^/$counter /g"  $pwd/hostlist.tmp
+		let line_num++
+	done
+	cp $pwd/hostlist.tmp $pwd/hostlist
+	rm -f $pwd/hostlist.tmp
+	error="Removed host."
+}
+
+
+#Function to list hosts available
+function list_host() {
+	echo "Current hosts are:"
+	cat $pwd/hostlist
+	echo "Press any button to continue."
+	echo -n $prompt; read
+}
+
+#Only forwards ssh keys to host
+function ssh_key_send() {
+	echo "Which host do you want to send your keys to?"
+	echo "Enter 'n' for a non-listed host"
+	cat $pwd/hostlist
+	echo -n $prompt; read con
+	if [ $con == "n" ]; then
+		echo "What is the IP of the host you want to send your key to?"
+		echo -n $prompt; read ans 
+		ssh-copy-id $(whoami)@$ans
+		if [ $? -eq 0 ]; then
+			error="Added key to $ans"
+			echo "$error at $(date)" | tee -a $log_dir/event.log
+		else
+			error="Error: authentication interrupted."
+			echo "$error at $(date)" | tee -a $log_dir/error.log
+		fi
+	else
+		let con++
+		con_ip=$(cat $pwd/hostlist |awk -F " " -v x=$con 'FNR == x {print $3}')
+		ssh-copy-id $(whoami)@$con_ip
+		if [ $? -eq 0 ]; then
+			error="Added key to $ans"
+			echo "$error at $(date)" | tee -a $log_dir/event.log
+		else
+			error="Error: authentication interrupted."
+			echo "$error at $(date)" | tee -a $log_dir/error.log
+		fi
+	fi
+}
+
+
+#Menu Function
+function main () {
+	while [ $runner == 1 ]; do
+		clear
+		echo $error #Doesnt always pass an error but I havent changed it yet.
+		echo "  CONNECTION  MANAGER  "
+		echo "#######################"
+		echo "# [0] Connect to Host #"
+		echo "# [1] Add Host        #"
+		echo "# [2] Remove Host     #"
+		echo "# [3] List Hosts      #"
+		echo "# [4] Add SSH Key     #"
+		echo "# [9] Exit            #"
+		echo "#######################"
+		echo -n $prompt & read ans
+		case $ans in
+			0) connect_shell
+			;;
+			1) add_host
+			;;
+			2) remove_host
+			;;
+			3) list_host
+			;;
+			4) ssh_key_send
+			;;
+			9) runner=0
+			;;
+		esac
+	done
+}
+
+
+###MAIN###
+if [ "$1" != "" ]; then
+	while [ "$1" != "" ]; do
+		case "$1" in
+			-h|--help)
+				usage
+				exit
+			;;
+			-p|--use-pwd-hostfile)
+				shift
+				pwd=$(pwd)
+			;;
+			-r|--run-setup)
+				setup
+			;;
+			-v|--version)
+				version_info
+				exit
+			;;
+			*)
+				echo "Unknown flag $1"
+				exit
+			;;
+		esac
+		shift
+	done
+else
+	usage
+fi
+main
+###DONE###
