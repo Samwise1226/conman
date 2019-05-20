@@ -1,0 +1,2 @@
+# conman
+SSH connection manager
