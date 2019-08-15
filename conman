@@ -9,6 +9,7 @@ prompt="> "
 runner=1
 error=""
 log_dir="/var/log/conman"
+c_user=$(whoami)
 
 #Trap Handler
 #Intedned so you dont ctrl-c out of the ssh connection when you are passing rsa keys
@@ -23,12 +24,14 @@ function trap_handler() {
 }
 trap trap_handler SIGINT;
 
+
 function usage() {
 	echo "Usage: conman [-p|--use-pwd-hostfile][-r|--run-setup][-h|--help][-v|--version]"
 	echo "-p --use-pwd-hostfile | Use the hostlist in your current working directory instead of the one in etc."
-	echo "-r --run-setup | Runs the setup checks."
+	echo "-r --run-setup | Runs the setup checks only."
 	echo "-h --help | Usage menu."
 }
+
 
 function setup() {
 	#Creates log dir
@@ -65,9 +68,9 @@ function connect_shell () {
 	echo "Connect to which host? (by number)"
 	echo -n $prompt; read con; let con++
 	con_ip=$(cat $pwd/hostlist |awk -F " " -v x=$con 'FNR == x {print $3}')
-		
-	echo "Use X11 forwarding? (y/n)"; read x11Forwarding
 	
+	echo "Use X11 forwarding? (y/n)"; read x11Forwarding
+
 	case $x11Forwarding in
 		y|yes|Yes|Y)
 			echo "Using ssh with X11 forwarding"
@@ -184,9 +187,9 @@ function main () {
 	while [ $runner == 1 ]; do
 		clear
 		echo $error #Doesnt always pass an error but I havent changed it yet.
+		echo "Current user: $c_user"
 		echo "  CONNECTION  MANAGER  "
 		echo "#######################"
-		echo "# Current user"
 		echo "# [0] Connect to Host #"
 		echo "# [1] Add Host        #"
 		echo "# [2] Remove Host     #"
@@ -227,6 +230,7 @@ if [ "$1" != "" ]; then
 			;;
 			-r|--run-setup)
 				setup
+				exit
 			;;
 			*)
 				echo "Unknown flag $1"
