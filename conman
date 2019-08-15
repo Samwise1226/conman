@@ -28,14 +28,7 @@ function usage() {
 	echo "-p --use-pwd-hostfile | Use the hostlist in your current working directory instead of the one in etc."
 	echo "-r --run-setup | Runs the setup checks."
 	echo "-h --help | Usage menu."
-	echo "-v --version | Version information"
 }
-
-
-function version_info() {
-	echo "Version: 1.0"
-}
-
 
 function setup() {
 	#Creates log dir
@@ -193,6 +186,7 @@ function main () {
 		echo $error #Doesnt always pass an error but I havent changed it yet.
 		echo "  CONNECTION  MANAGER  "
 		echo "#######################"
+		echo "# Current user"
 		echo "# [0] Connect to Host #"
 		echo "# [1] Add Host        #"
 		echo "# [2] Remove Host     #"
@@ -233,10 +227,6 @@ if [ "$1" != "" ]; then
 			;;
 			-r|--run-setup)
 				setup
-			;;
-			-v|--version)
-				version_info
-				exit
 			;;
 			*)
 				echo "Unknown flag $1"
