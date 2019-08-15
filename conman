@@ -1,7 +1,9 @@
 #!/bin/bash
 #Its pretty janky, but sometimes I cant remember all my connections. This will remember them for you. Isn't that nice.
 #Version 1.0
-#TODO add ssh key forwarding for added non ssh key hosts
+#TODO Allow changing users within
+#TODO Check setup for faults in file permissions
+#TODO Test with spec files
 
 #Sets up some script variables
 pwd="/etc/conman"
