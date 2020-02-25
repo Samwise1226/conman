@@ -9,6 +9,7 @@
 
 #Sets up some script variables
 confdir="$HOME/conman"
+header="        \e[91mCONNECTION  MANAGER\e[0m        "
 prompt="$(whoami) \e[5m> \e[0m"
 runner=1
 error=""
@@ -281,7 +282,7 @@ function main () {
 	while [ $runner == 1 ]; do
 		clear
 		echo $error; echo #Doesnt always pass an error but I havent changed it yet.
-		echo -e "        \e[91mCONNECTION  MANAGER\e[0m        "
+		echo -e $header
 		echo $breakline
 		echo "# [0] Connect to Host             #"
 		echo "# [1] Add Host                    #"
@@ -313,6 +314,11 @@ function main () {
 
 
 ###MAIN###
+macos=$(sw_vers | echo $?) 
+	if [ "$macos" = "0" ]; then
+		prompt="$(whoami) >"
+		header="        CONNECTION  MANAGER        "
+	fi
 if [ "$1" != "" ]; then
 	while [ "$1" != "" ]; do
 		case "$1" in
