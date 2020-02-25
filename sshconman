@@ -1,0 +1,344 @@
+#!/bin/bash
+#Its pretty janky, but sometimes I cant remember all my connections. This will remember them for you. Isn't that nice.
+#Version 1.0.1 Quality of life improvements
+#Version 1.0.2 Added X11 forwarding
+#Version 1.0.3 Added specific names for ssh keys
+#Version 1.0.4 Changed input to not require username
+#Version 1.0.5 Moved hostfile to users home directory by default
+#Version 1.0.6 Changed to have X11 run with using a flag
+
+#Sets up some script variables
+confdir="$HOME/conman"
+prompt="$(whoami) \e[5m> \e[0m"
+runner=1
+error=""
+log_dir="$HOME/conman/log"
+breakline="###################################"
+x11forwarding="n"
+
+#Trap Handler
+#Intedned so you dont ctrl-c out of the ssh connection when you are passing rsa keys or other things so you dont mess it up.
+function trap_handler () {
+	echo "\nDo you want to exit the application? [y/n]"
+	read trapans;
+	if [ $trapans == "y" ]; then
+		echo "Interrupt recieved at $(date)" | tee -a $log_dir/error.log
+		runner=0
+		break
+	fi
+}
+trap trap_handler SIGINT;
+
+
+function usage() {
+	echo "Usage: conman [-p|--use-pwd-hostfile][-r|--run-setup][-h|--help][-v|--version]"
+	echo "-p --use-pwd-hostfile | Use the hostlist in your current working directory instead of the one in etc."
+	echo "-r --run-setup | Runs the setup checks then exits."
+	echo "-h --help | Usage menu."
+	echo "-x --use-x11 | Allow X11 forwarding."
+}
+
+
+function setup() {
+	#Creates conf dir
+	if [ ! -d $confdir ]; then
+		echo "No configuration directory found."
+		mkdir -p $confdir
+	fi
+	#Creates log dir
+	if [ ! -d $log_dir ]; then
+		echo "No log directory found."
+		mkdir -p $log_dir
+	fi
+	#Checks if you have generated rsa public key
+	if [ -f ~/.ssh/id_rsa.pub ]; then
+		echo "Using existing SSH key."
+	else
+		echo "Generating SSH key.";
+		ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''
+	fi
+
+	#Checks hostlist 
+	if [ -f $confdir/hostlist ]; then
+		echo "Hostlist exists."
+	else
+		echo "No Hostlist found, creating a new one."
+		touch $confdir/hostlist
+	fi
+	echo "Setup ran at $(date)" | tee -a $log_dir/event.log
+}
+
+
+#Function to connect to remote host
+function connect_shell () {
+	clear
+	echo $breakline
+	cat $confdir/hostlist
+	echo $breakline
+	echo "Connect to which host? (by number)"
+	echo -n -e $prompt; read con; let con++
+	con_ip=$(cat $confdir/hostlist | awk -F " " -v x=$con 'FNR == x {print $3}')
+	user_name=$(cat $confdir/hostlist | awk -F " " -v x=$con 'FNR == x {print $4}')
+	case $x11forwarding in
+		y)
+			echo "Using ssh with X11 forwarding"
+			ssh -X $user_name@$con_ip
+		;;
+		n)
+			echo "Not using X11 forwarding."
+			ssh $user_name@$con_ip
+		;;
+	esac
+
+	echo "Connection to $con_ip exited with code: $?" | tee -a $log_dir/event.log 
+	error="Closed connection."
+}
+
+#Depricated Function
+#Function to connect to remote host as another user
+function connect_user() {
+	cat $confdir/hostlist
+        echo "Connect to which host? (by number)"
+        echo -n -e $prompt; read con; let con++
+        con_ip=$(cat $confdir/hostlist |awk -F " " -v x=$con 'FNR == x {print $3}')
+        echo "What user are you connecting as?"; read userans
+	if [ $userans == "" ]; then
+		error="No user specified"
+		return 69
+	else
+		echo "Use X11 forwarding? (y/n)"; read x11Forwarding
+       		case $x11Forwarding in
+                	y|yes|Yes|Y)
+                        	echo "Using ssh with X11 forwarding"
+                        	ssh -X $userans@$con_ip
+                	;;
+                	n|no|No|n)
+                        	echo "Not using X11 forwarding."
+                        	ssh $userans@$con_ip
+                	;;
+        	esac
+        fi
+	echo "Connection to $con_ip exited with code: $?" | tee -a $log_dir/event.log
+        error="Closed connection."
+}
+
+
+#Function to add host to the list
+function add_host() {
+	echo "What do you want to label the host as? (EG. Sensor1)"
+	echo -n -e $prompt; read host_name
+	echo "What is the IP of the host?"
+	echo -n -e $prompt; read dest_ip
+	echo "Copy ssh keys?"
+	echo -n -e $prompt; read ans
+	echo "Use a different user? 'n' to use current user. USER $(whoami)"
+	echo -n -e $prompt; read userans
+	if [ $userans == "n" ]; then
+		case $ans in
+			y|Y|yes|Yes)
+				ssh-copy-id $dest_ip
+				if [ $? -eq 0 ]; then
+					current_len=$(cat $confdir/hostlist | wc -l)
+					echo $current_len $host_name $dest_ip $(whoami) >> $confdir/hostlist
+					echo "Added $host_name $dest_ip to hostlist" | tee -a $log_dir/event.log
+					error="Success!"
+				else
+					error="Error: authentication interrupted."
+					echo "$error at $(date)" | tee -a $log_dir/error.log
+				fi
+			;;
+			*)
+				current_len=$(cat $confdir/hostlist | wc -l)
+				echo $current_len $host_name $dest_ip $(whoami) >> $confdir/hostlist
+				error="Success! (SSH Key not added)"
+				echo "$error at $(date)" | tee -a $log_dir/error.log
+			;;			
+		esac
+	else
+		case $ans in
+            y|Y|yes|Yes)
+                    ssh-copy-id $userans@$dest_ip
+                    if [ $? -eq 0 ]; then 
+                            current_len=$(cat $confdir/hostlist | wc -l)
+                            echo $current_len $host_name $dest_ip $userans >> $confdir/hostlist
+                            echo "Added $host_name $dest_ip to hostlist" | tee -a $log_dir/event.log
+                            error="Success!"
+                    else    
+                            error="Error: authentication interrupted."
+                            echo "$error at $(date)" | tee -a $log_dir/error.log
+                    fi      
+            ;;      
+            *)      
+				current_len=$(cat $confdir/hostlist | wc -l)
+                                echo $current_len $host_name $dest_ip $userans >> $confdir/hostlist
+                                error="Success! (SSH Key not added)"
+                                echo "$error at $(date)" | tee -a $log_dir/error.log
+                        ;;                              
+            esac
+	fi
+}
+
+
+#Function to remove host
+function remove_host() {
+	#Removes host from list
+	clear
+	echo $breakline
+	cat $confdir/hostlist
+	echo $breakline
+	echo "Remove which host?"
+	echo -n -e $prompt; read rem_host; let rem_host++
+	cat $confdir/hostlist | awk -F " " -v x=$rem_host 'FNR != x {print $2,$3}' > $confdir/hostlist.tmp
+	
+	#Reformats new list
+	#Yeah I know it probably could have been done better but it works
+	len=$(cat hostlist.tmp | wc -l)
+	line_num=1
+	for counter in $(seq 0 $len); do
+		sed -i "$line_num s/^/$counter /g"  $confdir/hostlist.tmp
+		let line_num++
+	done
+	cp $confdir/hostlist.tmp $confdir/hostlist
+	rm -f $confdir/hostlist.tmp
+	error="Removed host."
+}
+
+
+#Function to list hosts available
+function list_host() {
+	clear
+	echo "Current hosts are:"
+	echo $breakline
+	cat $confdir/hostlist
+	echo $breakline
+	echo "Press any button to continue."
+	echo -n -e $prompt; read
+}
+
+
+#Only forwards ssh keys to host
+function ssh_key_send() {
+	echo "Which host do you want to send your keys to?"
+	echo "Enter 'n' for a non-listed host"
+	echo $breakline
+	cat $confdir/hostlist
+	echo $breakline
+	echo -n -e $prompt; read con
+	if [ $con == "n" ]; then
+		echo "What is the IP of the host you want to send your key to?"
+		echo -n -e $prompt; read ans 
+		echo "Enter user or press 'n' to user current user. USER: $(whoami)"
+		echo -n -e $prompt; read userans
+		if [ $userans == "n" ];then 		
+			ssh-copy-id $(whoami)@$ans
+			if [ $? -eq 0 ]; then
+				error="Added key to $ans"
+				echo "$error at $(date)" | tee -a $log_dir/event.log
+			else
+				error="Error: authentication interrupted."
+				echo "$error at $(date)" | tee -a $log_dir/error.log
+			fi
+		else
+			ssh-copy-id $userans@$ans
+			if [ $? -eq 0 ]; then
+                                error="Added key to $ans"
+                                echo "$error at $(date)" | tee -a $log_dir/event.log
+                        else
+                                error="Error: authentication interrupted."
+                                echo "$error at $(date)" | tee -a $log_dir/error.log
+                        fi
+		fi
+	else
+		let con++
+		con_ip=$(cat $confdir/hostlist |awk -F " " -v x=$con 'FNR == x {print $3}')
+		ssh-copy-id $(whoami)@$con_ip
+		if [ $? -eq 0 ]; then
+			error="Added key to $ans"
+			echo "$error at $(date)" | tee -a $log_dir/event.log
+		else
+			error="Error: Authentication interrupted."
+			echo "$error at $(date)" | tee -a $log_dir/error.log
+		fi
+	fi
+}
+
+
+#Function to clear the host list
+function clear_hosts() {
+	if [ -f $confdir/hostlist ]; then
+		mv $confdir/hostlist $confdir/hostlist.bak
+		rm -f $confdir/hostlist
+		touch $confdir/hostlist
+		error="Cleared hostlist! (Moved old hostlist to backup)"
+	else
+		error="Hostfile does not exist"
+	fi
+}
+
+
+#Menu Function
+function main () {
+	while [ $runner == 1 ]; do
+		clear
+		echo $error; echo #Doesnt always pass an error but I havent changed it yet.
+		echo -e "        \e[91mCONNECTION  MANAGER\e[0m        "
+		echo $breakline
+		echo "# [0] Connect to Host             #"
+		echo "# [1] Add Host                    #"
+		echo "# [2] Remove Host                 #"
+		echo "# [3] List Hosts                  #"
+		echo "# [4] Add SSH Key                 #"
+		echo "# [5] Clear Hostlist              #"
+		echo "# [9] Exit                        #"
+		echo $breakline
+		echo -n -e $prompt & read ans
+		case $ans in
+			0) connect_shell
+			;;
+			1) add_host
+			;;
+			2) remove_host
+			;;
+			3) list_host
+			;;
+			4) ssh_key_send
+			;;
+			5) clear_hosts
+			;;
+			9) runner=0
+			;;
+		esac
+	done
+}
+
+
+###MAIN###
+if [ "$1" != "" ]; then
+	while [ "$1" != "" ]; do
+		case "$1" in
+			-h|--help)
+				usage
+				exit
+			;;
+			-p|--use-pwd-hostfile)
+				shift
+				confdir=$1
+			;;
+			-r|--run-setup)
+				setup
+				exit 69
+			;;
+			-x|--use-x11)
+				x11forwarding="y"
+			;;
+			*)
+				echo "Unknown flag $1"
+				usage
+				exit 69
+			;;
+		esac
+		shift
+	done
+fi
+main
+###DONE###
