@@ -1,4 +1,4 @@
-# conman
+# sshcm
 SSH connection manager
 
 Usage of the arguments is all optional.
